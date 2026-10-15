@@ -1,0 +1,23 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "Careergrill backend backend server",
+  "homepage": "https://github.com/GABRIELOFGOD/careergrill-backend#readme",
+  "bugs": {
+    "url": "https://github.com/GABRIELOFGOD/careergrill-backend/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/GABRIELOFGOD/careergrill-backend.git"
+  },
+  "license": "ISC",
+  "author": "GABRIELOFGOD",
+  "type": "commonjs",
+  "main": "index.ts",
+  "scripts": {
+    "test": "npm run test"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

@@ -10,6 +10,83 @@ export const defaultAiModels: Record<AiProvider, string> = {
   google: "gemini-2.5-flash",
 };
 
+async function requestAiText(
+  provider: AiProvider,
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  userPrompt: string,
+  jsonResponse = false,
+): Promise<string> {
+  let responseText: string;
+  if (provider === "openai") {
+    const messages = [
+      ...(systemPrompt ? [{ role: "system", content: systemPrompt }] : []),
+      { role: "user", content: userPrompt },
+    ];
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model,
+        messages,
+        ...(jsonResponse ? { response_format: { type: "json_object" } } : {}),
+        store: false,
+      }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    const result = await response.json() as {
+      choices?: Array<{ message?: { content?: string } }>;
+      error?: { message?: string };
+    };
+    if (!response.ok) throw new HttpError(502, result.error?.message ?? "The OpenAI request failed.", "AI_PROVIDER_FAILED");
+    responseText = result.choices?.[0]?.message?.content ?? "";
+  } else if (provider === "anthropic") {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 4000,
+        ...(systemPrompt ? { system: systemPrompt } : {}),
+        messages: [{ role: "user", content: userPrompt }],
+      }),
+      signal: AbortSignal.timeout(60_000),
+    });
+    const result = await response.json() as {
+      content?: Array<{ type?: string; text?: string }>;
+      error?: { message?: string };
+    };
+    if (!response.ok) throw new HttpError(502, result.error?.message ?? "The Anthropic request failed.", "AI_PROVIDER_FAILED");
+    responseText = result.content?.find((item) => item.type === "text")?.text ?? "";
+  } else {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify({
+          ...(systemPrompt ? { systemInstruction: { parts: [{ text: systemPrompt }] } } : {}),
+          contents: [{ parts: [{ text: userPrompt }] }],
+          ...(jsonResponse ? { generationConfig: { responseMimeType: "application/json" } } : {}),
+        }),
+        signal: AbortSignal.timeout(60_000),
+      },
+    );
+    const result = await response.json() as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      error?: { message?: string };
+    };
+    if (!response.ok) throw new HttpError(502, result.error?.message ?? "The Google AI request failed.", "AI_PROVIDER_FAILED");
+    responseText = result.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("") ?? "";
+  }
+  return responseText;
+}
+
 const generatedContentSchema = z.object({
   title: z.string().min(3).max(180),
   excerpt: z.string().max(500),
@@ -55,61 +132,20 @@ export async function generateContent(
     `Editor prompt:\n${prompt}`,
   ].join("\n\n");
 
-  let responseText: string;
-  if (provider === "openai") {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: instruction }],
-        response_format: { type: "json_object" },
-        store: false,
-      }),
-      signal: AbortSignal.timeout(60_000),
-    });
-    const result = await response.json() as {
-      choices?: Array<{ message?: { content?: string } }>;
-      error?: { message?: string };
-    };
-    if (!response.ok) throw new HttpError(502, result.error?.message ?? "The OpenAI request failed.", "AI_PROVIDER_FAILED");
-    responseText = result.choices?.[0]?.message?.content ?? "";
-  } else if (provider === "anthropic") {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ model, max_tokens: 4000, messages: [{ role: "user", content: instruction }] }),
-      signal: AbortSignal.timeout(60_000),
-    });
-    const result = await response.json() as {
-      content?: Array<{ type?: string; text?: string }>;
-      error?: { message?: string };
-    };
-    if (!response.ok) throw new HttpError(502, result.error?.message ?? "The Anthropic request failed.", "AI_PROVIDER_FAILED");
-    responseText = result.content?.find((item) => item.type === "text")?.text ?? "";
-  } else {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: instruction }] }],
-          generationConfig: { responseMimeType: "application/json" },
-        }),
-        signal: AbortSignal.timeout(60_000),
-      },
-    );
-    const result = await response.json() as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-      error?: { message?: string };
-    };
-    if (!response.ok) throw new HttpError(502, result.error?.message ?? "The Google AI request failed.", "AI_PROVIDER_FAILED");
-    responseText = result.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("") ?? "";
-  }
+  const responseText = await requestAiText(provider, apiKey, model, "", instruction, true);
   return parseGeneratedContent(responseText);
+}
+
+export async function generateAuditFeedback(
+  provider: AiProvider,
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  userPrompt: string,
+): Promise<string> {
+  const response = (await requestAiText(provider, apiKey, model, systemPrompt, userPrompt)).trim();
+  if (!response || response.length > 20_000) {
+    throw new HttpError(502, "The AI provider returned feedback in an unexpected format. Please try again.", "AI_RESPONSE_INVALID");
+  }
+  return response;
 }

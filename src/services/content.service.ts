@@ -7,18 +7,20 @@ export function sanitizeContentBody(body: string): string {
   return sanitizeHtml(body, {
     allowedTags: [
       ...sanitizeHtml.defaults.allowedTags,
-      "h2", "h3", "u", "img", "table", "thead", "tbody", "tr", "th", "td",
+      "h2", "h3", "u", "img", "table", "thead", "tbody", "tr", "th", "td", "div",
     ],
     allowedAttributes: {
       a: ["href", "name", "target", "rel"],
       img: ["src", "alt", "width", "height"],
       th: ["colspan", "rowspan"],
       td: ["colspan", "rowspan"],
+      div: ["data-text-box", "style"],
     },
     allowedStyles: {
       p: { "text-align": [/^(left|center|right|justify)$/] },
       h2: { "text-align": [/^(left|center|right|justify)$/] },
       h3: { "text-align": [/^(left|center|right|justify)$/] },
+      div: { "background-color": [/^#[0-9a-f]{6}$/i] },
     },
     allowedSchemes: ["http", "https", "mailto"],
     allowedSchemesByTag: { img: ["http", "https"] },

@@ -48,20 +48,24 @@ export function getGoogleAuthorizationUrl(state: string, nonce: string): string 
 
 export async function verifyGoogleAuthorizationCode(code: string, nonce: string): Promise<GoogleIdentity> {
   const client = googleClient();
+  const clientId = config.GOOGLE_CLIENT_ID;
+  if (!clientId) {
+    throw new HttpError(503, "Google sign-in is not configured.", "GOOGLE_AUTH_NOT_CONFIGURED");
+  }
   const { tokens } = await client.getToken(code);
   if (!tokens.id_token) {
     throw new HttpError(401, "Google did not return a verified identity.", "GOOGLE_IDENTITY_MISSING");
   }
   const ticket = await client.verifyIdToken({
     idToken: tokens.id_token,
-    audience: config.GOOGLE_CLIENT_ID,
+    audience: clientId,
   });
   const payload = ticket.getPayload();
   if (!payload?.sub || !payload.email || !payload.email_verified || !payload.nonce || !equalSecret(payload.nonce, nonce)) {
     throw new HttpError(401, "Google could not verify this account.", "GOOGLE_IDENTITY_INVALID");
   }
   const email = payload.email.trim().toLowerCase();
-  const providerName = payload.name?.trim() || email.split("@")[0];
+  const providerName = payload.name?.trim() || email.split("@")[0] || "Careergrill user";
   const name = (providerName.length < 2 ? `${providerName} User` : providerName).slice(0, 100);
   return {
     sub: payload.sub,

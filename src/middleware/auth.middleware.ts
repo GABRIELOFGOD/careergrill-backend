@@ -62,6 +62,7 @@ export function requireAdmin(request: AuthRequest, _response: Response, next: Ne
         return;
       }
       next();
-    })
-    .catch(next);
+    }, () => {
+      next(new HttpError(500, "Could not verify administrator access.", "AUTHORIZATION_FAILED"));
+    });
 }

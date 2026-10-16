@@ -125,15 +125,20 @@ const allowedTypes = new Map([
   [".md", "text/markdown"],
 ]);
 
+export function assertSupportedDocumentType(filename: string, mimetype: string): void {
+  const extension = path.extname(filename).toLowerCase();
+  if (allowedTypes.get(extension) !== mimetype) {
+    throw new HttpError(415, "Upload a PDF, DOCX, TXT or Markdown document.", "UNSUPPORTED_FILE_TYPE");
+  }
+}
+
 export async function extractDocumentText(
   buffer: Buffer,
   filename: string,
   mimetype: string,
 ): Promise<string> {
+  assertSupportedDocumentType(filename, mimetype);
   const extension = path.extname(filename).toLowerCase();
-  if (allowedTypes.get(extension) !== mimetype) {
-    throw new HttpError(415, "Upload a PDF, DOCX, TXT or Markdown document.", "UNSUPPORTED_FILE_TYPE");
-  }
 
   let text: string;
   if (extension === ".pdf") {

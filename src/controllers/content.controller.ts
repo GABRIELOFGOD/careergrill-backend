@@ -7,6 +7,8 @@ import {
   getPublishedContent,
   listAdminContent,
   listPublishedContent,
+  listTrashedContent,
+  restoreContent,
   updateContent,
 } from "../services/content.service.js";
 
@@ -23,6 +25,10 @@ export async function getAdminContent(_request: Request, response: Response): Pr
   response.json({ items: await listAdminContent() });
 }
 
+export async function getAdminTrash(_request: Request, response: Response): Promise<void> {
+  response.json({ items: await listTrashedContent() });
+}
+
 export async function postAdminContent(request: Request, response: Response): Promise<void> {
   response.status(201).json({ item: await createContent(contentInput.parse(request.body)) });
 }
@@ -35,4 +41,8 @@ export async function patchAdminContent(request: Request, response: Response): P
 export async function deleteAdminContent(request: Request, response: Response): Promise<void> {
   await deleteContent(z.string().uuid().parse(request.params.id));
   response.status(204).end();
+}
+
+export async function restoreAdminContent(request: Request, response: Response): Promise<void> {
+  response.json({ item: await restoreContent(z.string().uuid().parse(request.params.id)) });
 }

@@ -48,9 +48,11 @@ function withType<T extends Record<string, unknown>>(type: typeof contentTypes[n
   };
 }
 
-async function readById(id: string): Promise<ContentRecord | null> {
+async function readById(id: string, includeDeleted = false): Promise<ContentRecord | null> {
   const results = await Promise.all(contentTypes.map(async (type) => {
-    const { data, error } = await database().from(tableByType[type]).select("*").eq("id", id).maybeSingle();
+    let query = database().from(tableByType[type]).select("*").eq("id", id);
+    if (!includeDeleted) query = query.is("deleted_at", null);
+    const { data, error } = await query.maybeSingle();
     if (error) throw new HttpError(500, "Could not load this content.", "CONTENT_READ_FAILED");
     return data ? withType(type, data) as ContentRecord : null;
   }));
@@ -59,9 +61,15 @@ async function readById(id: string): Promise<ContentRecord | null> {
   return rows[0] ?? null;
 }
 
-export async function listContentByIds(type: typeof contentTypes[number], ids: string[]) {
+export async function listContentByIds(
+  type: typeof contentTypes[number],
+  ids: string[],
+  includeDeleted = false,
+) {
   if (!ids.length) return [];
-  const { data, error } = await database().from(tableByType[type]).select("*").in("id", ids);
+  let query = database().from(tableByType[type]).select("*").in("id", ids);
+  if (!includeDeleted) query = query.is("deleted_at", null);
+  const { data, error } = await query;
   if (error) throw new HttpError(500, "Could not load saved content.", "CONTENT_READ_FAILED");
   return (data ?? []).map((row) => withType(type, row));
 }
@@ -69,7 +77,7 @@ export async function listContentByIds(type: typeof contentTypes[number], ids: s
 export async function getContentById(id: string, type?: typeof contentTypes[number]) {
   const item = type
     ? await (async () => {
-      const { data, error } = await database().from(tableByType[type]).select("*").eq("id", id).maybeSingle();
+      const { data, error } = await database().from(tableByType[type]).select("*").eq("id", id).is("deleted_at", null).maybeSingle();
       if (error) throw new HttpError(500, "Could not load this content.", "CONTENT_READ_FAILED");
       return data ? withType(type, data) as ContentRecord : null;
     })()
@@ -85,6 +93,7 @@ export async function listPublishedContent(type?: typeof contentTypes[number]) {
       .from(tableByType[contentType])
       .select("id, title, slug, excerpt, body, category, tags, expires_at, source_url, data, published_at, created_at")
       .eq("status", "published")
+      .is("deleted_at", null)
       .or(`expires_at.is.null,expires_at.gt.${now}`)
       .order("published_at", { ascending: false });
     if (error) throw new HttpError(500, "Could not load published content.", "CONTENT_READ_FAILED");
@@ -101,6 +110,7 @@ export async function getPublishedContent(slug: string) {
       .select("id, title, slug, excerpt, body, category, tags, expires_at, source_url, data, published_at")
       .eq("slug", slug)
       .eq("status", "published")
+      .is("deleted_at", null)
       .maybeSingle();
     if (error) throw new HttpError(500, "Could not load this content.", "CONTENT_READ_FAILED");
     return data ? withType(type, data) : null;
@@ -116,11 +126,22 @@ export async function getPublishedContent(slug: string) {
 
 export async function listAdminContent() {
   const results = await Promise.all(contentTypes.map(async (type) => {
-    const { data, error } = await database().from(tableByType[type]).select("*").order("updated_at", { ascending: false });
+    const { data, error } = await database().from(tableByType[type]).select("*")
+      .is("deleted_at", null).order("updated_at", { ascending: false });
     if (error) throw new HttpError(500, "Could not load CMS content.", "CONTENT_READ_FAILED");
     return (data ?? []).map((row) => withType(type, row));
   }));
   return results.flat().sort((a, b) => String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")));
+}
+
+export async function listTrashedContent() {
+  const results = await Promise.all(contentTypes.map(async (type) => {
+    const { data, error } = await database().from(tableByType[type]).select("*")
+      .not("deleted_at", "is", null).order("deleted_at", { ascending: false });
+    if (error) throw new HttpError(500, "Could not load trashed content.", "CONTENT_TRASH_READ_FAILED");
+    return (data ?? []).map((row) => withType(type, row));
+  }));
+  return results.flat().sort((a, b) => String(b.deleted_at ?? "").localeCompare(String(a.deleted_at ?? "")));
 }
 
 export async function createContent(input: ContentInput) {
@@ -182,10 +203,20 @@ export async function updateContent(id: string, input: ContentUpdate) {
 export async function deleteContent(id: string) {
   const current = await readById(id);
   if (!current) throw new HttpError(404, "Content not found.", "CONTENT_NOT_FOUND");
-  const { error: savedError } = await database().from("saved_content").delete()
-    .eq("content_id", id).eq("content_type", current.type);
-  if (savedError) throw new HttpError(500, "Could not remove saved references to this content.", "CONTENT_DELETE_FAILED");
-  const { data, error } = await database().from(tableByType[current.type]).delete().eq("id", id).select("id").maybeSingle();
-  if (error) throw new HttpError(500, "Could not delete content.", "CONTENT_DELETE_FAILED");
+  const { data, error } = await database().from(tableByType[current.type])
+    .update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("id", id).is("deleted_at", null).select("id").maybeSingle();
+  if (error) throw new HttpError(500, "Could not move content to trash.", "CONTENT_DELETE_FAILED");
   if (!data) throw new HttpError(404, "Content not found.", "CONTENT_NOT_FOUND");
+}
+
+export async function restoreContent(id: string) {
+  const current = await readById(id, true);
+  if (!current || !current.deleted_at) throw new HttpError(404, "Trashed content not found.", "CONTENT_NOT_FOUND");
+  const { data, error } = await database().from(tableByType[current.type])
+    .update({ deleted_at: null, updated_at: new Date().toISOString() })
+    .eq("id", id).not("deleted_at", "is", null).select("*").maybeSingle();
+  if (error) throw new HttpError(500, "Could not restore content.", "CONTENT_RESTORE_FAILED");
+  if (!data) throw new HttpError(404, "Trashed content not found.", "CONTENT_NOT_FOUND");
+  return withType(current.type, data);
 }

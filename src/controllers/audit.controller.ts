@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { AuthRequest } from "../middleware/auth.middleware.js";
 import { decryptSecret, HttpError } from "../config.js";
 import { database } from "../database.js";
-import { aiProviderSchema, generateContent } from "../services/ai.service.js";
+import { aiProviderSchema, defaultAiModels, generateContent } from "../services/ai.service.js";
 import { readSetting, readStringMap } from "../services/settings.service.js";
 
 export async function listAudits(request: AuthRequest, response: Response): Promise<void> {
@@ -26,9 +26,15 @@ export async function createAuditFeedback(request: AuthRequest, response: Respon
     consent: z.literal(true),
   }).parse(request.body);
   const provider = aiProviderSchema.parse(await readSetting("ai_provider") ?? "openai");
-  const modelValue = await readSetting("ai_model");
-  const model = typeof modelValue === "string" ? modelValue : "gpt-4.1-mini";
-  const storedKeys = await readSetting("ai_credentials");
+  const [modelValue, modelsValue, storedKeys, providerValue] = await Promise.all([
+    readSetting("ai_model"),
+    readSetting("ai_models"),
+    readSetting("ai_credentials"),
+    readSetting("ai_provider"),
+  ]);
+  const storedProvider = aiProviderSchema.parse(providerValue ?? "openai");
+  const model = readStringMap(modelsValue, "AI model")[provider]
+    ?? (provider === storedProvider && typeof modelValue === "string" ? modelValue : defaultAiModels[provider]);
   const encryptedKey = readStringMap(storedKeys, "AI credentials")[provider];
   if (typeof encryptedKey !== "string") {
     throw new HttpError(503, "Career Audit feedback is not available yet. Please try again later.", "AI_SETUP_REQUIRED");

@@ -17,7 +17,7 @@ export async function listSavedContent(request: AuthRequest, response: Response)
   const rows = data ?? [];
   const resolved = await Promise.all(contentTypes.map(async (type) => {
     const ids = rows.filter((row) => row.content_type === type).map((row) => row.content_id);
-    const items = await listContentByIds(type, ids);
+    const items = await listContentByIds(type, ids, true);
     return items.map((item) => [item.id, item] as const);
   }));
   const contentById = new Map(resolved.flat());

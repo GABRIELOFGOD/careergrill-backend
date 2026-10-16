@@ -4,6 +4,12 @@ import { HttpError } from "../config.js";
 export const aiProviderSchema = z.enum(["openai", "anthropic", "google"]);
 export type AiProvider = z.infer<typeof aiProviderSchema>;
 
+export const defaultAiModels: Record<AiProvider, string> = {
+  openai: "gpt-4.1-mini",
+  anthropic: "claude-sonnet-4-20250514",
+  google: "gemini-2.5-flash",
+};
+
 const generatedContentSchema = z.object({
   title: z.string().min(3).max(180),
   excerpt: z.string().max(500),

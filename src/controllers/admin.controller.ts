@@ -3,8 +3,8 @@ import { z } from "zod";
 import type { AuthRequest } from "../middleware/auth.middleware.js";
 import { config, decryptSecret, encryptSecret, HttpError } from "../config.js";
 import { database } from "../database.js";
-import { extractDocumentText } from "../services/documents.service.js";
-import { aiProviderSchema, generateContent } from "../services/ai.service.js";
+import { assertSupportedDocumentType, extractDocumentText } from "../services/documents.service.js";
+import { aiProviderSchema, defaultAiModels, generateContent } from "../services/ai.service.js";
 import { deleteAsset, uploadAsset } from "../services/storage.service.js";
 import { deleteSetting, readSetting, readStringMap, writeSetting } from "../services/settings.service.js";
 import { listAdminContent, sanitizeContentBody } from "../services/content.service.js";
@@ -25,20 +25,28 @@ export async function getOverview(_request: AuthRequest, response: Response): Pr
 }
 
 export async function getSettings(_request: AuthRequest, response: Response): Promise<void> {
-  const [provider, model, storageProvider, aiCredentials, cloudinaryCredentials] = await Promise.all([
+  const [provider, model, storedModels, storageProvider, aiCredentials, cloudinaryCredentials] = await Promise.all([
     readSetting("ai_provider"),
     readSetting("ai_model"),
+    readSetting("ai_models"),
     readSetting("storage_provider"),
     readSetting("ai_credentials"),
     readSetting("cloudinary_credentials"),
   ]);
   const credentials = readStringMap(aiCredentials, "AI credentials");
+  const configuredModels = readStringMap(storedModels, "AI model");
+  const defaultProvider = aiProviderSchema.parse(provider ?? "openai");
+  const models = { ...defaultAiModels, ...configuredModels };
+  if (typeof model === "string" && !configuredModels[defaultProvider]) models[defaultProvider] = model;
+  const cloudinary = readStringMap(cloudinaryCredentials, "Cloudinary credentials");
   response.json({
     ai_provider: provider ?? "openai",
     ai_model: model ?? "gpt-4.1-mini",
+    ai_models: models,
     storage_provider: storageProvider ?? "supabase",
     configured_ai_providers: Object.keys(credentials),
-    cloudinary_configured: Boolean(readStringMap(cloudinaryCredentials, "Cloudinary credentials").cloud_name),
+    cloudinary_configured: ["cloud_name", "api_key", "api_secret"].every((key) => Boolean(cloudinary[key])),
+    supabase_storage_bucket: config.SUPABASE_STORAGE_BUCKET,
     email_configured: Boolean(config.SMTP_HOST && config.SMTP_USER && config.SMTP_PASSWORD && config.SMTP_FROM),
   });
 }
@@ -49,28 +57,38 @@ export async function updateSettings(request: AuthRequest, response: Response): 
     ai_model: z.string().trim().min(2).max(120).optional(),
     storage_provider: z.enum(["supabase", "cloudinary"]).optional(),
     ai_api_key: z.string().trim().min(8).max(500).optional(),
+    ai_models: z.partialRecord(aiProviderSchema, z.string().trim().min(2).max(120)).optional(),
     cloudinary_cloud_name: z.string().trim().min(2).max(150).optional(),
     cloudinary_api_key: z.string().trim().min(4).max(150).optional(),
     cloudinary_api_secret: z.string().trim().min(8).max(300).optional(),
   }).parse(request.body);
+  const cloudinaryValues = [input.cloudinary_cloud_name, input.cloudinary_api_key, input.cloudinary_api_secret];
+  let cloudinaryCredentialsInput: { cloud_name: string; api_key: string; api_secret: string } | undefined;
+  if (cloudinaryValues.some(Boolean)) {
+    const [cloudName, apiKey, apiSecret] = cloudinaryValues;
+    if (!cloudName || !apiKey || !apiSecret) {
+      throw new HttpError(422, "Enter all three Cloudinary credentials together.", "CLOUDINARY_CREDENTIALS_INCOMPLETE");
+    }
+    cloudinaryCredentialsInput = { cloud_name: cloudName, api_key: apiKey, api_secret: apiSecret };
+  }
   if (input.ai_api_key && !input.ai_provider) {
     throw new HttpError(422, "Choose an AI provider before saving its API key.", "PROVIDER_REQUIRED");
   }
   if (input.ai_provider) await writeSetting("ai_provider", input.ai_provider);
   if (input.ai_model) await writeSetting("ai_model", input.ai_model);
+  if (input.ai_models) {
+    const configuredModels = readStringMap(await readSetting("ai_models"), "AI model");
+    await writeSetting("ai_models", { ...configuredModels, ...input.ai_models });
+  }
   if (input.ai_api_key && input.ai_provider) {
     const credentials = readStringMap(await readSetting("ai_credentials"), "AI credentials");
     await writeSetting("ai_credentials", { ...credentials, [input.ai_provider]: encryptSecret(input.ai_api_key) });
   }
-  const cloudinaryValues = [input.cloudinary_cloud_name, input.cloudinary_api_key, input.cloudinary_api_secret];
-  if (cloudinaryValues.some(Boolean)) {
-    if (!cloudinaryValues.every(Boolean)) {
-      throw new HttpError(422, "Enter all three Cloudinary credentials together.", "CLOUDINARY_CREDENTIALS_INCOMPLETE");
-    }
+  if (cloudinaryCredentialsInput) {
     await writeSetting("cloudinary_credentials", {
-      cloud_name: encryptSecret(input.cloudinary_cloud_name!),
-      api_key: encryptSecret(input.cloudinary_api_key!),
-      api_secret: encryptSecret(input.cloudinary_api_secret!),
+      cloud_name: encryptSecret(cloudinaryCredentialsInput.cloud_name),
+      api_key: encryptSecret(cloudinaryCredentialsInput.api_key),
+      api_secret: encryptSecret(cloudinaryCredentialsInput.api_secret),
     });
   }
   if (input.storage_provider === "cloudinary") {
@@ -88,10 +106,17 @@ export async function generateDraft(request: AuthRequest, response: Response): P
     prompt: z.string().trim().min(2).max(4000),
     type: z.enum(["job", "scholarship", "article", "resource", "service", "faq", "testimonial"]),
     document_ids: z.array(z.string().uuid()).max(10).default([]),
+    provider: aiProviderSchema.optional(),
   }).parse(request.body);
-  const provider = aiProviderSchema.parse(await readSetting("ai_provider") ?? "openai");
-  const storedModel = await readSetting("ai_model");
-  const model = typeof storedModel === "string" ? storedModel : "gpt-4.1-mini";
+  const defaultProvider = aiProviderSchema.parse(await readSetting("ai_provider") ?? "openai");
+  const provider = input.provider ?? defaultProvider;
+  const [storedModel, storedModels] = await Promise.all([
+    readSetting("ai_model"),
+    readSetting("ai_models"),
+  ]);
+  const models = readStringMap(storedModels, "AI model");
+  const model = models[provider]
+    ?? (provider === defaultProvider && typeof storedModel === "string" ? storedModel : defaultAiModels[provider]);
   const encryptedKey = readStringMap(await readSetting("ai_credentials"), "AI credentials")[provider];
   if (typeof encryptedKey !== "string") {
     throw new HttpError(503, `Add an API key for ${provider} in Settings.`, "AI_SETUP_REQUIRED");
@@ -99,10 +124,13 @@ export async function generateDraft(request: AuthRequest, response: Response): P
   let sourceText = "";
   if (input.document_ids.length) {
     const { data, error } = await database().from("ai_documents")
-      .select("id, filename, extracted_text").in("id", input.document_ids);
+      .select("id, filename, extracted_text, processing_status").in("id", input.document_ids);
     if (error) throw new HttpError(500, "Could not load the selected reference documents.", "DOCUMENT_READ_FAILED");
     if (data?.length !== input.document_ids.length) {
       throw new HttpError(404, "One or more selected reference documents are unavailable.", "DOCUMENT_NOT_FOUND");
+    }
+    if (data.some((document) => document.processing_status !== "ready")) {
+      throw new HttpError(409, "Wait for selected documents to finish processing before generating a draft.", "DOCUMENT_NOT_READY");
     }
     sourceText = data.map((document) => `--- ${document.filename} ---\n${document.extracted_text}`).join("\n\n").slice(0, 120_000);
   }
@@ -113,7 +141,8 @@ export async function generateDraft(request: AuthRequest, response: Response): P
 
 export async function listReferenceDocuments(_request: AuthRequest, response: Response): Promise<void> {
   const { data, error } = await database().from("ai_documents")
-    .select("id, filename, mimetype, size_bytes, created_at").order("created_at", { ascending: false });
+    .select("id, filename, mimetype, size_bytes, created_at, processing_status")
+    .order("created_at", { ascending: false });
   if (error) throw new HttpError(500, "Could not load uploaded documents.", "DOCUMENT_READ_FAILED");
   response.json({ items: data });
 }
@@ -121,25 +150,49 @@ export async function listReferenceDocuments(_request: AuthRequest, response: Re
 export async function uploadReferenceDocument(request: AuthRequest, response: Response): Promise<void> {
   const file = request.file;
   if (!file) throw new HttpError(400, "Choose a document to upload.", "FILE_REQUIRED");
-  const extractedText = await extractDocumentText(file.buffer, file.originalname, file.mimetype);
+  assertSupportedDocumentType(file.originalname, file.mimetype);
   const asset = await uploadAsset(file.buffer, file.originalname, file.mimetype);
   const { data, error } = await database().from("ai_documents")
     .insert({
       filename: file.originalname.slice(0, 180),
       mimetype: file.mimetype,
       size_bytes: file.size,
-      extracted_text: extractedText,
+      extracted_text: "",
       storage_provider: asset.provider,
       storage_key: asset.key,
       uploaded_by: request.user!.id,
+      processing_status: "processing",
     })
     .select("id, filename, mimetype, size_bytes, created_at")
     .single();
   if (error) {
-    await deleteAsset(asset.provider, asset.key);
+    try {
+      await deleteAsset(asset.provider, asset.key);
+    } catch (cleanupError) {
+      console.error("Could not remove the uploaded file after its database record failed:", cleanupError);
+    }
     throw new HttpError(500, "Could not save the uploaded document.", "DOCUMENT_CREATE_FAILED");
   }
-  response.status(201).json({ item: data });
+  response.status(201).json({ item: { ...data, processing_status: "processing" } });
+  void indexReferenceDocument(data.id, file.buffer, file.originalname, file.mimetype);
+}
+
+async function indexReferenceDocument(id: string, buffer: Buffer, filename: string, mimetype: string): Promise<void> {
+  try {
+    const extractedText = await extractDocumentText(buffer, filename, mimetype);
+    const { error } = await database().from("ai_documents")
+      .update({ extracted_text: extractedText, processing_status: "ready" }).eq("id", id);
+    if (error) throw error;
+  } catch (error) {
+    console.error("Reference document indexing failed:", error);
+    try {
+      const { error: updateError } = await database().from("ai_documents")
+        .update({ processing_status: "failed" }).eq("id", id);
+      if (updateError) console.error("Could not record reference document indexing failure:", updateError);
+    } catch (updateError) {
+      console.error("Could not record reference document indexing failure:", updateError);
+    }
+  }
 }
 
 export async function deleteReferenceDocument(request: AuthRequest, response: Response): Promise<void> {

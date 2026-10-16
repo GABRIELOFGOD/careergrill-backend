@@ -26,7 +26,7 @@ The frontend is a separate Next.js project; this API exposes version-independent
    npm run dev
    ```
 
-The default API URL is `http://localhost:4000`; the frontend uses it unless `NEXT_PUBLIC_API_URL` is set. The frontend origin must match `FRONTEND_URL`.
+The default API URL is `http://localhost:4000`; the frontend uses it unless `NEXT_PUBLIC_API_URL` is set. The frontend origin must match `FRONTEND_URL`. For Vercel frontend and Render API deployments, configure the frontend's same-origin API proxy (`NEXT_PUBLIC_API_URL=/`, `API_PROXY_TARGET=https://<render-api-origin>`). Set `FRONTEND_URL` to the exact Vercel origin. If Google OAuth is enabled, use `https://<frontend-origin>/api/auth/google/callback` as `GOOGLE_CALLBACK_URL` and register that exact URI with Google; this keeps OAuth session cookies on the frontend origin as well.
 
 Generate a JWT secret with `openssl rand -base64 48`; generate the 32-byte `APP_ENCRYPTION_KEY` with `openssl rand -hex 32`. Set a unique, high-entropy `ADMIN_BOOTSTRAP_TOKEN` of at least 24 characters. Set `NODE_ENV=production` for production deployments, use HTTPS, and use distinct secrets.
 

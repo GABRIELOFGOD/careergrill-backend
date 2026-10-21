@@ -1,20 +1,56 @@
 import type { Request, Response } from "express";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { contentInput, contentTypes, contentUpdate } from "../content.js";
+import { contentInput, publicContentTypes, contentUpdate } from "../content.js";
 import {
   createContent,
   deleteContent,
   getPublishedContent,
   listAdminContent,
   listPublishedContent,
+  listPublishedTestimonials,
   listTrashedContent,
   restoreContent,
   updateContent,
 } from "../services/content.service.js";
 
+const testimonialsPerPage = 6;
+
 export async function getPublishedContentList(request: Request, response: Response): Promise<void> {
-  const type = request.query.type ? z.enum(contentTypes).parse(request.query.type) : undefined;
+  const type = request.query.type ? z.enum(publicContentTypes).parse(request.query.type) : undefined;
   response.json({ items: await listPublishedContent(type) });
+}
+
+export async function getPublishedTestimonials(request: Request, response: Response): Promise<void> {
+  const { page } = z.object({
+    page: z.coerce.number().int().positive().max(10000).default(1),
+  }).parse(request.query);
+  response.json(await listPublishedTestimonials(page, testimonialsPerPage));
+}
+
+export async function postClientFeedback(request: Request, response: Response): Promise<void> {
+  const input = z.object({
+    name: z.string().trim().min(2).max(100),
+    context: z.string().trim().max(100).default(""),
+    feedback: z.string().trim().min(20).max(5000),
+    consent: z.literal(true),
+  }).parse(request.body);
+  const nameParts = input.name.split(/\s+/);
+  const initials = nameParts.slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("");
+  await createContent({
+    type: "testimonial",
+    title: `Feedback from ${input.name}`,
+    slug: `client-feedback-${randomUUID()}`,
+    excerpt: input.feedback.slice(0, 500),
+    body: input.feedback,
+    category: input.context,
+    tags: [],
+    status: "draft",
+    expires_at: null,
+    source_url: null,
+    data: { author: input.name, attribution: input.context, initials },
+  });
+  response.status(201).json({ message: "Thank you. Your feedback has been submitted for review." });
 }
 
 export async function getPublishedContentBySlug(request: Request, response: Response): Promise<void> {

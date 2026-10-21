@@ -8,6 +8,8 @@ import { aiProviderSchema, defaultAiModels, generateContent } from "../services/
 import { deleteAsset, uploadAsset } from "../services/storage.service.js";
 import { deleteSetting, readSetting, readStringMap, writeSetting } from "../services/settings.service.js";
 import { listAdminContent, sanitizeContentBody } from "../services/content.service.js";
+import { servicePricingSchema } from "../pricing.js";
+import { readServicePricing } from "../services/pricing.service.js";
 
 export async function getOverview(_request: AuthRequest, response: Response): Promise<void> {
   const [content, files, users] = await Promise.all([
@@ -25,7 +27,7 @@ export async function getOverview(_request: AuthRequest, response: Response): Pr
 }
 
 export async function getSettings(_request: AuthRequest, response: Response): Promise<void> {
-  const [provider, model, storedModels, storageProvider, aiCredentials, cloudinaryCredentials, careerAuditPrompt] = await Promise.all([
+  const [provider, model, storedModels, storageProvider, aiCredentials, cloudinaryCredentials, careerAuditPrompt, servicePricing] = await Promise.all([
     readSetting("ai_provider"),
     readSetting("ai_model"),
     readSetting("ai_models"),
@@ -33,6 +35,7 @@ export async function getSettings(_request: AuthRequest, response: Response): Pr
     readSetting("ai_credentials"),
     readSetting("cloudinary_credentials"),
     readSetting("career_audit_prompt"),
+    readServicePricing(),
   ]);
   const credentials = readStringMap(aiCredentials, "AI credentials");
   const configuredModels = readStringMap(storedModels, "AI model");
@@ -47,6 +50,7 @@ export async function getSettings(_request: AuthRequest, response: Response): Pr
     ai_model: model ?? "gpt-4.1-mini",
     ai_models: models,
     career_audit_prompt: auditPrompt.data,
+    service_pricing: servicePricing,
     storage_provider: storageProvider ?? "supabase",
     configured_ai_providers: Object.keys(credentials),
     cloudinary_configured: ["cloud_name", "api_key", "api_secret"].every((key) => Boolean(cloudinary[key])),
@@ -63,6 +67,7 @@ export async function updateSettings(request: AuthRequest, response: Response): 
     ai_api_key: z.string().trim().min(8).max(500).optional(),
     ai_models: z.partialRecord(aiProviderSchema, z.string().trim().min(2).max(120)).optional(),
     career_audit_prompt: z.string().trim().max(8000).optional(),
+    service_pricing: servicePricingSchema.optional(),
     cloudinary_cloud_name: z.string().trim().min(2).max(150).optional(),
     cloudinary_api_key: z.string().trim().min(4).max(150).optional(),
     cloudinary_api_secret: z.string().trim().min(8).max(300).optional(),
@@ -88,6 +93,9 @@ export async function updateSettings(request: AuthRequest, response: Response): 
   if (input.career_audit_prompt !== undefined) {
     await writeSetting("career_audit_prompt", input.career_audit_prompt);
   }
+  if (input.service_pricing !== undefined) {
+    await writeSetting("service_pricing", input.service_pricing);
+  }
   if (input.ai_api_key && input.ai_provider) {
     const credentials = readStringMap(await readSetting("ai_credentials"), "AI credentials");
     await writeSetting("ai_credentials", { ...credentials, [input.ai_provider]: encryptSecret(input.ai_api_key) });
@@ -112,7 +120,7 @@ export async function updateSettings(request: AuthRequest, response: Response): 
 export async function generateDraft(request: AuthRequest, response: Response): Promise<void> {
   const input = z.object({
     prompt: z.string().trim().min(2).max(4000),
-    type: z.enum(["job", "scholarship", "article", "resource", "service", "faq", "testimonial"]),
+    type: z.enum(["job", "scholarship", "article", "resource", "service", "testimonial"]),
     document_ids: z.array(z.string().uuid()).max(10).default([]),
     provider: aiProviderSchema.optional(),
   }).parse(request.body);

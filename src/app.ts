@@ -10,6 +10,9 @@ import authRoutes, { bootstrapRouter } from "./routes/auth.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import savedContentRoutes from "./routes/saved-content.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
+import pricingRoutes from "./routes/pricing.routes.js";
+import faqRoutes from "./routes/faqs.routes.js";
+import publicConfigRoutes from "./routes/public-config.routes.js";
 import { config, HttpError } from "./config.js";
 
 const app = express();
@@ -49,10 +52,13 @@ app.get("/api/health", (_request, response) => {
 });
 app.use("/api/content", contentRoutes);
 app.use("/api/admin/content", adminContentRoutes);
+app.use("/api/admin/faqs", faqRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/admin/bootstrap", bootstrapRouter);
 app.use("/api/saved", savedContentRoutes);
 app.use("/api/audits", auditRoutes);
+app.use("/api/pricing", pricingRoutes);
+app.use("/api/config", publicConfigRoutes);
 app.use("/api/admin", adminRoutes);
 
 app.use((_request, _response, next) => next(new HttpError(404, "This API route was not found.", "ROUTE_NOT_FOUND")));

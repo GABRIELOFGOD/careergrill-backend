@@ -1,0 +1,3 @@
+insert into public.app_settings (key, value)
+values ('service_pricing', '{"career":{"bands":{"0-3":{"individual":20000,"bundle":50000},"4-6":{"individual":35000,"bundle":90000},"7-10":{"individual":50000,"bundle":130000},"10+":{"individual":80000,"bundle":205000}},"interview":50000},"admissions":{"clarity":60000,"precision":100000,"distinction":150000},"scholarships":{"1-2":[170000,220000,270000],"3-4":[200000,260000,320000],"5-6":[240000,310000,390000],"7+":[null,null,null]},"mba":{"essentials":100000,"mastery":150000,"fullRide":180000,"discountAtFive":5,"discountAtTen":10}}'::jsonb)
+on conflict (key) do nothing;

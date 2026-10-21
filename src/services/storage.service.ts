@@ -117,6 +117,29 @@ export async function getContentImage(provider: string, key: string): Promise<Bu
   return Buffer.from(await data.arrayBuffer());
 }
 
+export async function getAsset(provider: string, key: string, filename = key): Promise<Buffer> {
+  if (provider === "cloudinary") {
+    const { cloud_name, api_key, api_secret } = await cloudinaryConfig();
+    cloudinary.config({ cloud_name, api_key, api_secret, secure: true });
+    const extension = path.extname(filename).slice(1) || path.extname(key).slice(1) || "bin";
+    const publicId = path.extname(key) ? key.slice(0, -path.extname(key).length) : key;
+    const url = cloudinary.utils.private_download_url(publicId, extension, {
+      resource_type: "raw",
+      type: "authenticated",
+      expires_at: Math.floor(Date.now() / 1000) + 60,
+    });
+    const result = await fetch(url);
+    if (!result.ok) throw new HttpError(502, "The stored file could not be loaded.", "STORAGE_READ_FAILED");
+    return Buffer.from(await result.arrayBuffer());
+  }
+  if (provider !== "supabase") {
+    throw new HttpError(500, "The stored file provider is invalid.", "STORAGE_PROVIDER_INVALID");
+  }
+  const { data, error } = await database().storage.from(config.SUPABASE_STORAGE_BUCKET).download(key);
+  if (error || !data) throw new HttpError(502, "The stored file could not be loaded.", "STORAGE_READ_FAILED");
+  return Buffer.from(await data.arrayBuffer());
+}
+
 export async function deleteAsset(provider: string, key: string): Promise<void> {
   if (provider === "cloudinary") {
     cloudinary.config(await cloudinaryConfig());

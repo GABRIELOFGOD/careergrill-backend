@@ -1,12 +1,18 @@
 import { z } from "zod";
 
 export const contentTypes = ["job", "scholarship", "article", "resource", "service", "faq", "testimonial"] as const;
+export const publicContentTypes = ["job", "scholarship", "article", "resource", "service", "testimonial"] as const;
 export const contentStatuses = ["draft", "published", "archived"] as const;
 
+const contentSlug = z.preprocess(
+  (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
+  z.string().trim().min(3).max(180).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),
+);
+
 export const contentInput = z.object({
-  type: z.enum(contentTypes),
+  type: z.enum(publicContentTypes),
   title: z.string().trim().min(3).max(180),
-  slug: z.string().trim().min(3).max(180).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),
+  slug: contentSlug,
   excerpt: z.string().trim().max(500).default(""),
   body: z.string().max(200000).default(""),
   category: z.string().trim().max(80).default(""),
@@ -21,7 +27,7 @@ export const contentInput = z.object({
 });
 
 export const contentUpdate = contentInput.partial().omit({ slug: true }).extend({
-  slug: z.string().trim().min(3).max(180).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),
+  slug: contentSlug,
 });
 
 export type ContentInput = z.infer<typeof contentInput>;

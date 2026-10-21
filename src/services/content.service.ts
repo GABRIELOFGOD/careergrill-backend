@@ -1,7 +1,7 @@
 import { database } from "../database.js";
 import { HttpError } from "../config.js";
 import sanitizeHtml from "sanitize-html";
-import { contentTypes, makeSlug, type ContentInput, type ContentUpdate } from "../content.js";
+import { contentTypes, publicContentTypes, makeSlug, type ContentInput, type ContentUpdate } from "../content.js";
 
 export function sanitizeContentBody(body: string): string {
   return sanitizeHtml(body, {
@@ -43,9 +43,29 @@ const tableByType = {
 export type ContentRecord = Record<string, unknown> & { id: string; type: typeof contentTypes[number] };
 
 function withType<T extends Record<string, unknown>>(type: typeof contentTypes[number], row: T): T & { type: typeof contentTypes[number] } {
+  const data = row.data && typeof row.data === "object" && !Array.isArray(row.data)
+    ? row.data as Record<string, unknown>
+    : null;
+  const schema = data?.resource_schema && typeof data.resource_schema === "object" && !Array.isArray(data.resource_schema)
+    ? data.resource_schema as Record<string, unknown>
+    : null;
+  const sections = Array.isArray(schema?.sections) ? schema.sections : null;
+  const safeResourceSchema = sections
+    ? {
+      ...schema,
+      sections: sections.map((section) => {
+        if (!section || typeof section !== "object" || Array.isArray(section)) return section;
+        const resourceSection = section as Record<string, unknown>;
+        return typeof resourceSection.content === "string"
+          ? { ...resourceSection, content: sanitizeContentBody(resourceSection.content) }
+          : resourceSection;
+      }),
+    }
+    : schema;
   return {
     ...row,
     ...(typeof row.body === "string" ? { body: sanitizeContentBody(row.body) } : {}),
+    ...(type === "resource" && data && safeResourceSchema ? { data: { ...data, resource_schema: safeResourceSchema } } : {}),
     type,
   };
 }
@@ -87,9 +107,9 @@ export async function getContentById(id: string, type?: typeof contentTypes[numb
   return item;
 }
 
-export async function listPublishedContent(type?: typeof contentTypes[number]) {
+export async function listPublishedContent(type?: typeof publicContentTypes[number]) {
   const now = new Date().toISOString();
-  const types = type ? [type] : [...contentTypes];
+  const types = type ? [type] : [...publicContentTypes];
   const results = await Promise.all(types.map(async (contentType) => {
     const { data, error } = await database()
       .from(tableByType[contentType])
@@ -99,15 +119,42 @@ export async function listPublishedContent(type?: typeof contentTypes[number]) {
       .or(`expires_at.is.null,expires_at.gt.${now}`)
       .order("published_at", { ascending: false });
     if (error) throw new HttpError(500, "Could not load published content.", "CONTENT_READ_FAILED");
-    return (data ?? []).map((row) => withType(contentType, row));
+    return (data ?? []).map((row) => {
+      const item = withType(contentType, row);
+      if (contentType !== "resource") return item;
+      const resourceData = item.data as Record<string, unknown>;
+      const { resource_schema: _resourceSchema, ...listData } = resourceData;
+      return { ...item, data: listData };
+    });
   }));
   return results.flat()
     .sort((a, b) => String(b.published_at ?? "").localeCompare(String(a.published_at ?? "")))
     .slice(0, 100);
 }
 
+export async function listPublishedTestimonials(page: number, pageSize: number) {
+  const now = new Date().toISOString();
+  const start = (page - 1) * pageSize;
+  const { data, count, error } = await database()
+    .from(tableByType.testimonial)
+    .select("id, title, slug, excerpt, body, category, tags, expires_at, source_url, data, published_at, created_at", { count: "exact" })
+    .eq("status", "published")
+    .is("deleted_at", null)
+    .or(`expires_at.is.null,expires_at.gt.${now}`)
+    .order("published_at", { ascending: false })
+    .range(start, start + pageSize - 1);
+  if (error) throw new HttpError(500, "Could not load published client feedback.", "CONTENT_READ_FAILED");
+  return {
+    items: (data ?? []).map((row) => withType("testimonial", row)),
+    total: count ?? 0,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil((count ?? 0) / pageSize)),
+  };
+}
+
 export async function getPublishedContent(slug: string) {
-  const results = await Promise.all(contentTypes.map(async (type) => {
+  const results = await Promise.all(publicContentTypes.map(async (type) => {
     const { data, error } = await database().from(tableByType[type])
       .select("id, title, slug, excerpt, body, category, tags, expires_at, source_url, data, published_at")
       .eq("slug", slug)
@@ -127,7 +174,7 @@ export async function getPublishedContent(slug: string) {
 }
 
 export async function listAdminContent() {
-  const results = await Promise.all(contentTypes.map(async (type) => {
+  const results = await Promise.all(publicContentTypes.map(async (type) => {
     const { data, error } = await database().from(tableByType[type]).select("*")
       .is("deleted_at", null).order("updated_at", { ascending: false });
     if (error) throw new HttpError(500, "Could not load CMS content.", "CONTENT_READ_FAILED");
@@ -137,7 +184,7 @@ export async function listAdminContent() {
 }
 
 export async function listTrashedContent() {
-  const results = await Promise.all(contentTypes.map(async (type) => {
+  const results = await Promise.all(publicContentTypes.map(async (type) => {
     const { data, error } = await database().from(tableByType[type]).select("*")
       .not("deleted_at", "is", null).order("deleted_at", { ascending: false });
     if (error) throw new HttpError(500, "Could not load trashed content.", "CONTENT_TRASH_READ_FAILED");

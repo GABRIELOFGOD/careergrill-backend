@@ -242,28 +242,29 @@ const publicCopySchema = z.object({
 });
 
 const publicContentSchema = z.object({
-  service_faqs: z.array(z.object({
-    question: z.string().min(1),
-    answer: z.string().min(1),
-  })),
   consultation_services: consultationServices,
 });
 
-export async function getPublicConfiguration(_request: Request, response: Response): Promise<void> {
-  const [savedContent, savedCopy] = await Promise.all([
-    readSetting("site_public_content"),
-    readSetting("site_business_copy"),
-  ]);
-  if (savedContent === undefined || savedCopy === undefined) {
-    throw new HttpError(500, "Public site content has not been configured in the database.", "PUBLIC_CONTENT_NOT_CONFIGURED");
+export async function getPublicPricingCopy(_request: Request, response: Response): Promise<void> {
+  const savedCopy = await readSetting("site_business_copy");
+  if (savedCopy === undefined) {
+    throw new HttpError(500, "Service pricing details have not been configured.", "PRICING_COPY_NOT_CONFIGURED");
   }
-  const parsedContent = publicContentSchema.safeParse(savedContent);
-  if (!parsedContent.success) {
-    throw new HttpError(500, "Saved public service content is invalid.", "PUBLIC_CONTENT_INVALID");
-  }
-  const parsedCopy = publicCopySchema.safeParse(savedCopy);
+  const parsedCopy = publicCopySchema.pick({ pricing: true }).safeParse(savedCopy);
   if (!parsedCopy.success) {
-    throw new HttpError(500, "Saved public business copy is invalid.", "PUBLIC_COPY_INVALID");
+    throw new HttpError(500, "Saved service pricing details are invalid.", "PRICING_COPY_INVALID");
   }
-  response.json({ ...parsedContent.data, ...parsedCopy.data });
+  response.json({ pricing: parsedCopy.data.pricing });
+}
+
+export async function getPublicConsultationServices(_request: Request, response: Response): Promise<void> {
+  const savedContent = await readSetting("site_public_content");
+  if (savedContent === undefined) {
+    throw new HttpError(500, "Consultation services have not been configured.", "CONSULTATION_CONFIG_NOT_CONFIGURED");
+  }
+  const parsedServices = publicContentSchema.pick({ consultation_services: true }).safeParse(savedContent);
+  if (!parsedServices.success) {
+    throw new HttpError(500, "Saved consultation service details are invalid.", "CONSULTATION_CONFIG_INVALID");
+  }
+  response.json({ consultation_services: parsedServices.data.consultation_services });
 }

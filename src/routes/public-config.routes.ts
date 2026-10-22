@@ -1,8 +1,12 @@
 import { Router } from "express";
-import { getPublicConfiguration } from "../controllers/public-config.controller.js";
+import {
+  getPublicConsultationServices,
+  getPublicPricingCopy,
+} from "../controllers/public-config.controller.js";
 import { asyncHandler } from "../middleware/async-handler.js";
 
 const router = Router();
-router.get("/", asyncHandler(getPublicConfiguration));
+router.get("/pricing-copy", asyncHandler(getPublicPricingCopy));
+router.get("/consultation", asyncHandler(getPublicConsultationServices));
 
 export default router;

@@ -27,7 +27,7 @@ export async function getOverview(_request: AuthRequest, response: Response): Pr
 }
 
 export async function getSettings(_request: AuthRequest, response: Response): Promise<void> {
-  const [provider, model, storedModels, storageProvider, aiCredentials, cloudinaryCredentials, careerAuditPrompt, servicePricing] = await Promise.all([
+  const [provider, model, storedModels, storageProvider, aiCredentials, cloudinaryCredentials, careerAuditPrompt, servicePricing, gtmContainerId] = await Promise.all([
     readSetting("ai_provider"),
     readSetting("ai_model"),
     readSetting("ai_models"),
@@ -36,12 +36,16 @@ export async function getSettings(_request: AuthRequest, response: Response): Pr
     readSetting("cloudinary_credentials"),
     readSetting("career_audit_prompt"),
     readServicePricing(),
+    readSetting("gtm_container_id"),
   ]);
   const credentials = readStringMap(aiCredentials, "AI credentials");
   const configuredModels = readStringMap(storedModels, "AI model");
   const defaultProvider = aiProviderSchema.parse(provider ?? "openai");
   const auditPrompt = z.string().max(8000).safeParse(careerAuditPrompt ?? "");
   if (!auditPrompt.success) throw new HttpError(500, "Career Audit instructions are invalid.", "AUDIT_PROMPT_INVALID");
+  const parsedGtmId = z.string().regex(/^GTM-[A-Z0-9]+$/).or(z.literal(""))
+    .safeParse(gtmContainerId ?? "");
+  if (!parsedGtmId.success) throw new HttpError(500, "Saved Google Tag Manager configuration is invalid.", "GTM_CONFIG_INVALID");
   const models = { ...defaultAiModels, ...configuredModels };
   if (typeof model === "string" && !configuredModels[defaultProvider]) models[defaultProvider] = model;
   const cloudinary = readStringMap(cloudinaryCredentials, "Cloudinary credentials");
@@ -50,6 +54,7 @@ export async function getSettings(_request: AuthRequest, response: Response): Pr
     ai_model: model ?? "gpt-4.1-mini",
     ai_models: models,
     career_audit_prompt: auditPrompt.data,
+    gtm_container_id: parsedGtmId.data || "",
     service_pricing: servicePricing,
     storage_provider: storageProvider ?? "supabase",
     configured_ai_providers: Object.keys(credentials),
@@ -68,6 +73,7 @@ export async function updateSettings(request: AuthRequest, response: Response): 
     ai_models: z.partialRecord(aiProviderSchema, z.string().trim().min(2).max(120)).optional(),
     career_audit_prompt: z.string().trim().max(8000).optional(),
     service_pricing: servicePricingSchema.optional(),
+    gtm_container_id: z.string().trim().toUpperCase().regex(/^GTM-[A-Z0-9]+$/).or(z.literal("")).optional(),
     cloudinary_cloud_name: z.string().trim().min(2).max(150).optional(),
     cloudinary_api_key: z.string().trim().min(4).max(150).optional(),
     cloudinary_api_secret: z.string().trim().min(8).max(300).optional(),
@@ -95,6 +101,10 @@ export async function updateSettings(request: AuthRequest, response: Response): 
   }
   if (input.service_pricing !== undefined) {
     await writeSetting("service_pricing", input.service_pricing);
+  }
+  if (input.gtm_container_id !== undefined) {
+    if (input.gtm_container_id) await writeSetting("gtm_container_id", input.gtm_container_id);
+    else await deleteSetting("gtm_container_id");
   }
   if (input.ai_api_key && input.ai_provider) {
     const credentials = readStringMap(await readSetting("ai_credentials"), "AI credentials");

@@ -268,3 +268,16 @@ export async function getPublicConsultationServices(_request: Request, response:
   }
   response.json({ consultation_services: parsedServices.data.consultation_services });
 }
+
+export async function getPublicAnalyticsConfig(_request: Request, response: Response): Promise<void> {
+  const savedId = await readSetting("gtm_container_id");
+  if (savedId === undefined || savedId === null || savedId === "") {
+    response.json({ gtm_container_id: null });
+    return;
+  }
+  const parsedId = z.string().regex(/^GTM-[A-Z0-9]+$/).safeParse(savedId);
+  if (!parsedId.success) {
+    throw new HttpError(500, "Saved Google Tag Manager configuration is invalid.", "GTM_CONFIG_INVALID");
+  }
+  response.json({ gtm_container_id: parsedId.data });
+}

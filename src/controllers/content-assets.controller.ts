@@ -50,6 +50,7 @@ export async function getContentImageAsset(request: Request, response: Response)
     .set("Content-Type", data.mimetype)
     .set("Content-Length", String(image.byteLength))
     .set("X-Content-Type-Options", "nosniff")
+    .set("Cross-Origin-Resource-Policy", "cross-origin")
     .set("Cache-Control", "public, max-age=31536000, immutable")
     .send(image);
 }

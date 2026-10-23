@@ -1,7 +1,7 @@
 import { database } from "../database.js";
 import { HttpError } from "../config.js";
 import sanitizeHtml from "sanitize-html";
-import { contentTypes, publicContentTypes, makeSlug, type ContentInput, type ContentUpdate } from "../content.js";
+import { contentTypes, publicContentTypes, isReservedBlogSlug, makeSlug, type ContentInput, type ContentUpdate } from "../content.js";
 
 export function sanitizeContentBody(body: string): string {
   return sanitizeHtml(body, {
@@ -132,6 +132,31 @@ export async function listPublishedContent(type?: typeof publicContentTypes[numb
     .slice(0, 100);
 }
 
+export async function listPublishedSitemapContent() {
+  const now = new Date().toISOString();
+  const types = [...publicContentTypes];
+  const results = await Promise.all(types.map(async (type) => {
+    const entries: { type: typeof type; slug: string; published_at: string | null }[] = [];
+    const pageSize = 1000;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await database()
+        .from(tableByType[type])
+        .select("slug, published_at")
+        .eq("status", "published")
+        .is("deleted_at", null)
+        .or(`expires_at.is.null,expires_at.gt.${now}`)
+        .order("published_at", { ascending: false })
+        .range(offset, offset + pageSize - 1);
+      if (error) throw new HttpError(500, "Could not load sitemap content.", "CONTENT_READ_FAILED");
+      const rows = data ?? [];
+      entries.push(...rows.map((row) => ({ type, slug: row.slug, published_at: row.published_at })));
+      if (rows.length < pageSize) break;
+    }
+    return entries;
+  }));
+  return results.flat();
+}
+
 export async function listPublishedTestimonials(page: number, pageSize: number) {
   const now = new Date().toISOString();
   const start = (page - 1) * pageSize;
@@ -196,6 +221,9 @@ export async function listTrashedContent() {
 export async function createContent(input: ContentInput) {
   const slug = input.slug ?? makeSlug(input.title);
   if (!slug) throw new HttpError(422, "Add a title that can be used to create a URL.", "INVALID_SLUG");
+  if (input.type === "article" && isReservedBlogSlug(slug)) {
+    throw new HttpError(422, "Blog slugs cannot match reserved website paths.", "RESERVED_BLOG_SLUG");
+  }
   const existing = await Promise.all(contentTypes.map(async (type) => {
     const { data, error } = await database().from(tableByType[type]).select("id").eq("slug", slug).maybeSingle();
     if (error) throw new HttpError(500, "Could not check the content URL.", "CONTENT_READ_FAILED");
@@ -220,6 +248,9 @@ export async function updateContent(id: string, input: ContentUpdate) {
   if (!current) throw new HttpError(404, "Content not found.", "CONTENT_NOT_FOUND");
   if (input.type && input.type !== current.type) {
     throw new HttpError(422, "Content cannot be moved between content types.", "CONTENT_TYPE_IMMUTABLE");
+  }
+  if (current.type === "article" && input.slug && isReservedBlogSlug(input.slug)) {
+    throw new HttpError(422, "Blog slugs cannot match reserved website paths.", "RESERVED_BLOG_SLUG");
   }
   if (input.slug) {
     const slugMatches = await Promise.all(contentTypes.map(async (type) => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { contentInput, contentUpdate, makeSlug } from "./content.js";
+import { contentInput, contentUpdate, isReservedBlogSlug, makeSlug } from "./content.js";
 
 test("content slugs are normalized into URL-safe values", () => {
   assert.equal(makeSlug("Éducation, Work & You!"), "education-work-you");
@@ -27,6 +27,12 @@ test("blank content slugs are treated as omitted so titles can generate slugs", 
   };
   assert.equal(contentInput.parse(valid).slug, undefined);
   assert.equal(contentUpdate.parse({ slug: "" }).slug, undefined);
+});
+
+test("root-level blog slugs cannot shadow fixed website routes", () => {
+  assert.equal(isReservedBlogSlug("jobs"), true);
+  assert.equal(isReservedBlogSlug("career-audit"), true);
+  assert.equal(isReservedBlogSlug("my-article"), false);
 });
 
 test("FAQs are excluded from generic content create validation", () => {

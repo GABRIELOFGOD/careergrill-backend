@@ -4,6 +4,32 @@ export const contentTypes = ["job", "scholarship", "article", "resource", "servi
 export const publicContentTypes = ["job", "scholarship", "article", "resource", "service", "testimonial"] as const;
 export const contentStatuses = ["draft", "published", "archived"] as const;
 
+const reservedBlogSlugs = new Set([
+  "admin",
+  "blog",
+  "career-audit",
+  "client-feedback",
+  "content",
+  "consultation",
+  "dashboard",
+  "faq",
+  "job",
+  "jobs",
+  "my-audits",
+  "privacy",
+  "resources",
+  "scholarship",
+  "scholarships",
+  "services",
+  "signin",
+  "verify-email",
+  "workspace",
+]);
+
+export function isReservedBlogSlug(slug: string): boolean {
+  return reservedBlogSlugs.has(slug);
+}
+
 const contentSlug = z.preprocess(
   (value) => typeof value === "string" && value.trim() === "" ? undefined : value,
   z.string().trim().min(3).max(180).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),

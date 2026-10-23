@@ -8,6 +8,7 @@ import {
   getPublishedContent,
   listAdminContent,
   listPublishedContent,
+  listPublishedSitemapContent,
   listPublishedTestimonials,
   listTrashedContent,
   restoreContent,
@@ -17,6 +18,10 @@ import {
 const testimonialsPerPage = 6;
 
 export async function getPublishedContentList(request: Request, response: Response): Promise<void> {
+  if (request.query.sitemap === "1") {
+    response.json({ items: await listPublishedSitemapContent() });
+    return;
+  }
   const type = request.query.type ? z.enum(publicContentTypes).parse(request.query.type) : undefined;
   response.json({ items: await listPublishedContent(type) });
 }

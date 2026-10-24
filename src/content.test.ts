@@ -19,6 +19,17 @@ test("content validation rejects invalid publication status and unsafe URLs", ()
   assert.equal(contentInput.safeParse({ ...valid, source_url: "javascript:alert(1)" }).success, false);
 });
 
+test("blog posts accept an optional publication timestamp for backdating", () => {
+  const valid = {
+    type: "article",
+    title: "A useful application guide",
+    published_at: "2025-04-03T09:30:00.000Z",
+  };
+  assert.equal(contentInput.safeParse(valid).success, true);
+  assert.equal(contentInput.safeParse({ ...valid, published_at: "not-a-date" }).success, false);
+  assert.equal(contentUpdate.safeParse({ published_at: null }).success, true);
+});
+
 test("blank content slugs are treated as omitted so titles can generate slugs", () => {
   const valid = {
     type: "testimonial",

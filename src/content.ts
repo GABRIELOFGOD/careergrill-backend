@@ -44,6 +44,7 @@ export const contentInput = z.object({
   category: z.string().trim().max(80).default(""),
   tags: z.array(z.string().trim().min(1).max(40)).max(12).default([]),
   status: z.enum(contentStatuses).default("draft"),
+  published_at: z.string().datetime().nullable().optional(),
   expires_at: z.string().datetime().nullable().optional(),
   source_url: z.string().url().refine((value) => {
     const protocol = new URL(value).protocol;

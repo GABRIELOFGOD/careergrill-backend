@@ -232,10 +232,13 @@ export async function createContent(input: ContentInput) {
   if (existing.some(Boolean)) throw new HttpError(409, "That URL is already in use.", "SLUG_IN_USE");
 
   const now = new Date().toISOString();
-  const { type, ...fields } = input;
+  const { type, published_at: _publishedAt, ...fields } = input;
+  const publishedAt = type === "article"
+    ? input.published_at ?? (input.status === "published" ? now : null)
+    : input.status === "published" ? now : null;
   const { data, error } = await database()
     .from(tableByType[type])
-    .insert({ ...fields, body: sanitizeContentBody(fields.body), slug, published_at: input.status === "published" ? now : null, updated_at: now })
+    .insert({ ...fields, body: sanitizeContentBody(fields.body), slug, published_at: publishedAt, updated_at: now })
     .select("*")
     .single();
   if (error?.code === "23505") throw new HttpError(409, "That URL is already in use.", "SLUG_IN_USE");
@@ -262,14 +265,22 @@ export async function updateContent(id: string, input: ContentUpdate) {
       throw new HttpError(409, "That URL is already in use.", "SLUG_IN_USE");
     }
   }
-  const { type: _type, ...fields } = input;
+  const { type: _type, published_at: _publishedAt, ...fields } = input;
+  const now = new Date().toISOString();
+  const publishedAtUpdate = current.type === "article"
+    ? input.published_at !== undefined
+      ? { published_at: input.published_at ?? (input.status === "published" ? now : null) }
+      : input.status === "published" && current.status !== "published"
+        ? { published_at: now }
+        : {}
+    : input.status === "published" ? { published_at: now } : {};
   const { data, error } = await database()
     .from(tableByType[current.type])
     .update({
       ...fields,
       ...(fields.body === undefined ? {} : { body: sanitizeContentBody(fields.body) }),
-      ...(input.status === "published" ? { published_at: new Date().toISOString() } : {}),
-      updated_at: new Date().toISOString(),
+      ...publishedAtUpdate,
+      updated_at: now,
     })
     .eq("id", id)
     .select("*")

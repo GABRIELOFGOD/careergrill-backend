@@ -5,6 +5,7 @@ import { decryptSecret, HttpError } from "../config.js";
 import { database } from "../database.js";
 import { aiProviderSchema, defaultAiModels, generateAuditFeedback } from "../services/ai.service.js";
 import { readSetting, readStringMap } from "../services/settings.service.js";
+import { careerAuditPromptSchema } from "../career-audit.js";
 
 export async function getAuditAvailability(_request: Request, response: Response): Promise<void> {
   const provider = aiProviderSchema.parse(await readSetting("ai_provider") ?? "openai");
@@ -14,10 +15,24 @@ export async function getAuditAvailability(_request: Request, response: Response
 
 export async function listAudits(request: AuthRequest, response: Response): Promise<void> {
   const { data, error } = await database().from("audit_records")
-    .select("id, goal, answers, feedback, created_at")
+    .select("id, goal, answers, feedback, rating, created_at")
     .eq("user_id", request.user!.id).order("created_at", { ascending: false }).limit(50);
   if (error) throw new HttpError(500, "Could not load your audit history.", "AUDIT_READ_FAILED");
   response.json({ items: data });
+}
+
+export async function rateAudit(request: AuthRequest, response: Response): Promise<void> {
+  const id = z.string().uuid().parse(request.params.id);
+  const { rating } = z.object({ rating: z.number().int().min(1).max(5) }).parse(request.body);
+  const { data, error } = await database().from("audit_records")
+    .update({ rating })
+    .eq("id", id)
+    .eq("user_id", request.user!.id)
+    .select("id, rating")
+    .maybeSingle();
+  if (error) throw new HttpError(500, "Could not save your rating.", "AUDIT_RATING_SAVE_FAILED");
+  if (!data) throw new HttpError(404, "Audit not found.", "AUDIT_NOT_FOUND");
+  response.json({ item: data });
 }
 
 export async function createAuditFeedback(request: AuthRequest, response: Response): Promise<void> {
@@ -47,7 +62,7 @@ export async function createAuditFeedback(request: AuthRequest, response: Respon
   if (typeof encryptedKey !== "string") {
     throw new HttpError(503, "Career Audit feedback is not available yet. Please try again later.", "AI_SETUP_REQUIRED");
   }
-  const additionalPrompt = z.string().max(8000).safeParse(configuredPrompt ?? "");
+  const additionalPrompt = careerAuditPromptSchema.safeParse(configuredPrompt ?? "");
   if (!additionalPrompt.success) throw new HttpError(500, "Career Audit instructions are invalid.", "AUDIT_PROMPT_INVALID");
   const { data: reserved, error: reserveError } = await database().rpc("reserve_audit_request", { p_user_id: request.user!.id });
   if (reserveError) throw new HttpError(500, "Could not check your AI usage limit.", "AUDIT_LIMIT_CHECK_FAILED");
@@ -77,7 +92,7 @@ export async function createAuditFeedback(request: AuthRequest, response: Respon
       feedback,
       consented_at: new Date().toISOString(),
     })
-    .select("id, goal, answers, feedback, created_at")
+    .select("id, goal, answers, feedback, rating, created_at")
     .single();
   if (error) throw new HttpError(500, "Feedback was generated but could not be saved. Please try again.", "AUDIT_SAVE_FAILED");
   response.status(201).json({ item: data, feedback: data.feedback });

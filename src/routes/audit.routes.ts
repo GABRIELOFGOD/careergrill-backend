@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import { requireAuth } from "../middleware/auth.middleware.js";
-import { createAuditFeedback, deleteAudit, getAuditAvailability, listAudits } from "../controllers/audit.controller.js";
+import { createAuditFeedback, deleteAudit, getAuditAvailability, listAudits, rateAudit } from "../controllers/audit.controller.js";
 import { asyncHandler, authenticatedAsyncHandler } from "../middleware/async-handler.js";
 
 const router = Router();
@@ -10,6 +10,7 @@ router.get("/availability", asyncHandler(getAuditAvailability));
 router.use(requireAuth);
 router.get("/", authenticatedAsyncHandler(listAudits));
 router.post("/feedback", aiLimiter, authenticatedAsyncHandler(createAuditFeedback));
+router.patch("/:id/rating", authenticatedAsyncHandler(rateAudit));
 router.delete("/:id", authenticatedAsyncHandler(deleteAudit));
 
 export default router;

@@ -7,6 +7,7 @@ import {
   generateDraft,
   getOverview,
   getSettings,
+  listCareerAudits,
   listReferenceDocuments,
   updateSettings,
   uploadReferenceDocument,
@@ -20,6 +21,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 
 router.use(requireAuth, requireAdmin);
 router.get("/overview", authenticatedAsyncHandler(getOverview));
+router.get("/audits", authenticatedAsyncHandler(listCareerAudits));
 router.get("/settings", authenticatedAsyncHandler(getSettings));
 router.put("/settings", authenticatedAsyncHandler(updateSettings));
 router.post("/ai/generate", aiLimiter, authenticatedAsyncHandler(generateDraft));

@@ -9,6 +9,7 @@ import { deleteAsset, uploadAsset } from "../services/storage.service.js";
 import { deleteSetting, readSetting, readStringMap, writeSetting } from "../services/settings.service.js";
 import { listAdminContent, sanitizeContentBody } from "../services/content.service.js";
 import { servicePricingSchema } from "../pricing.js";
+import { careerAuditPromptSchema } from "../career-audit.js";
 import { readServicePricing } from "../services/pricing.service.js";
 
 export async function getOverview(_request: AuthRequest, response: Response): Promise<void> {
@@ -23,6 +24,39 @@ export async function getOverview(_request: AuthRequest, response: Response): Pr
     publishedCount: content.filter((item) => item.status === "published").length,
     documentCount: files.count ?? 0,
     userCount: users.count ?? 0,
+  });
+}
+
+export async function listCareerAudits(_request: AuthRequest, response: Response): Promise<void> {
+  const [audits, ratings, usage] = await Promise.all([
+    database().from("audit_records")
+      .select("id, goal, feedback, rating, created_at", { count: "exact" })
+      .order("created_at", { ascending: false })
+      .limit(100),
+    database().from("audit_records").select("rating").not("rating", "is", null),
+    database().from("audit_daily_usage").select("usage_date, request_count"),
+  ]);
+  if (audits.error || ratings.error || usage.error) {
+    throw new HttpError(500, "Could not load Career Audit activity.", "AUDIT_ADMIN_READ_FAILED");
+  }
+  const ratedItems = ratings.data ?? [];
+  const today = new Date().toISOString().slice(0, 10);
+  const usageItems = usage.data ?? [];
+  response.json({
+    totalAudits: audits.count ?? 0,
+    totalRatings: ratedItems.length,
+    averageRating: ratedItems.length
+      ? ratedItems.reduce((sum, item) => sum + (item.rating ?? 0), 0) / ratedItems.length
+      : null,
+    totalUsage: usageItems.reduce((sum, item) => sum + item.request_count, 0),
+    todayUsage: usageItems.reduce((sum, item) => sum + (item.usage_date === today ? item.request_count : 0), 0),
+    items: (audits.data ?? []).map((audit) => ({
+      id: audit.id,
+      goal: audit.goal,
+      feedback: audit.feedback,
+      rating: audit.rating,
+      created_at: audit.created_at,
+    })),
   });
 }
 
@@ -41,7 +75,7 @@ export async function getSettings(_request: AuthRequest, response: Response): Pr
   const credentials = readStringMap(aiCredentials, "AI credentials");
   const configuredModels = readStringMap(storedModels, "AI model");
   const defaultProvider = aiProviderSchema.parse(provider ?? "openai");
-  const auditPrompt = z.string().max(8000).safeParse(careerAuditPrompt ?? "");
+  const auditPrompt = careerAuditPromptSchema.safeParse(careerAuditPrompt ?? "");
   if (!auditPrompt.success) throw new HttpError(500, "Career Audit instructions are invalid.", "AUDIT_PROMPT_INVALID");
   const parsedGtmId = z.string().regex(/^GTM-[A-Z0-9]+$/).or(z.literal(""))
     .safeParse(gtmContainerId ?? "");
@@ -71,7 +105,7 @@ export async function updateSettings(request: AuthRequest, response: Response): 
     storage_provider: z.enum(["supabase", "cloudinary"]).optional(),
     ai_api_key: z.string().trim().min(8).max(500).optional(),
     ai_models: z.partialRecord(aiProviderSchema, z.string().trim().min(2).max(120)).optional(),
-    career_audit_prompt: z.string().trim().max(8000).optional(),
+    career_audit_prompt: careerAuditPromptSchema.trim().optional(),
     service_pricing: servicePricingSchema.optional(),
     gtm_container_id: z.string().trim().toUpperCase().regex(/^GTM-[A-Z0-9]+$/).or(z.literal("")).optional(),
     cloudinary_cloud_name: z.string().trim().min(2).max(150).optional(),
